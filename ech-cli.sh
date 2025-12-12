@@ -281,11 +281,45 @@ view_logs() {
     journalctl -u ech-workers -n 50 -f
 }
 
+# 脚本版本
+SCRIPT_VER="v1.1.0"
+
+# 检查脚本更新
+check_script_update() {
+    echo -e "${YELLOW}正在检查脚本更新...${PLAIN}"
+    REMOTE_VERSION=$(curl -s "https://raw.githubusercontent.com/lzban8/ech-cli-tool/main/ech-cli.sh" | grep 'SCRIPT_VER="' | head -n 1 | cut -d '"' -f 2)
+    
+    if [[ -z "$REMOTE_VERSION" ]]; then
+        UPDATE_TIP="${RED}检查失败${PLAIN}"
+        return
+    fi
+
+    if [[ "$REMOTE_VERSION" != "$SCRIPT_VER" ]]; then
+        UPDATE_TIP="${GREEN}发现新版本: ${REMOTE_VERSION}${PLAIN}"
+        CAN_UPDATE=1
+    else
+        UPDATE_TIP="${GREEN}已是最新${PLAIN}"
+        CAN_UPDATE=0
+    fi
+}
+
+# 更新脚本
+update_script() {
+    wget -O /root/ech-cli.sh "https://raw.githubusercontent.com/lzban8/ech-cli-tool/main/ech-cli.sh" && chmod +x /root/ech-cli.sh
+    echo -e "${GREEN}脚本更新成功！请重新运行脚本。${PLAIN}"
+    exit 0
+}
+
 # 主菜单
 show_menu() {
     clear
     check_status
     load_config
+    # 异步检查更新 (或是快速检查)
+     if [ -z "$UPDATE_TIP" ]; then
+        check_script_update
+    fi
+
     echo -e "${BLUE}
     ███████╗ ██████╗██╗  ██╗
     ██╔════╝██╔════╝██║  ██║
@@ -295,6 +329,7 @@ show_menu() {
     ╚══════╝ ╚═════╝╚═╝  ╚═╝
     ${PLAIN}"
     echo -e "快捷键已设置为 ${YELLOW}ech${PLAIN} , 下次运行输入 ${YELLOW}ech${PLAIN} 即可"
+    echo -e "当前版本: ${GREEN}${SCRIPT_VER}${PLAIN}  更新状态: ${UPDATE_TIP}"
     echo -e "------------------------------------------------------"
     echo -e "状态     : $STATUS"
     echo -e "系统     : $OS ($ARCH)"
@@ -317,9 +352,10 @@ show_menu() {
     echo -e " ${GREEN}6.${PLAIN} 查看日志"
     echo -e " ${GREEN}7.${PLAIN} 卸载客户端"
     echo -e " ${GREEN}8.${PLAIN} 创建快捷指令 (修复)"
+    echo -e " ${GREEN}9.${PLAIN} 更新管理脚本"
     echo -e " ${GREEN}0.${PLAIN} 退出脚本"
     echo -e "------------------------------------------------------"
-    read -p "请输入选择 [0-8]: " choice
+    read -p "请输入选择 [0-9]: " choice
     
     case $choice in
         1) install_ech ;;
@@ -336,6 +372,7 @@ show_menu() {
             echo -e "${GREEN}已卸载${PLAIN}"
             ;;
         8) create_shortcut ;;
+        9) update_script ;;
         0) exit 0 ;;
         *) echo -e "${RED}无效选择${PLAIN}" ;;
     esac
