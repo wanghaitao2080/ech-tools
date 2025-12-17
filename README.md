@@ -67,7 +67,7 @@
 | 变量名 | 说明 | 示例值 |
 |--------|------|--------|
 | `TOKEN` | 身份验证令牌（可选） | `your-secret-token` |
-| `PROXYIP` | 自定义 PROXYIP（可选，多个用逗号分隔） | `proxyip.cmliussss.net` |
+| `PROXYIP` | 自定义反代地址（可选，支持 IP 或域名，多个用逗号分隔） | `proxyip.cmliussss.net` 或 `1.2.3.4` |
 
 > 💡 如果不配置环境变量，将自动使用内置的公共 PROXYIP 列表
 

@@ -5,8 +5,8 @@ const WS_READY_STATE_CLOSING = 2;
 // 在 Cloudflare Dashboard -> Workers -> 设置 -> 变量 中配置以下环境变量：
 //
 // TOKEN      - 身份验证令牌（可选，留空表示不验证）
-// PROXYIP    - 自定义 PROXYIP（可选，多个用逗号分隔）
-//              例如: 'proxyip.cmliussss.net' 或 'ip1.com,ip2.com'
+// PROXYIP    - 自定义反代地址（可选，支持 IP 或域名，多个用逗号分隔）
+//              例如: 'proxyip.cmliussss.net' 或 '1.2.3.4' 或 'ip1.com,ip2.com'
 //
 // 如果不配置环境变量，将使用下方的默认值
 // ===========================================================
