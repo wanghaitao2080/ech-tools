@@ -33,7 +33,57 @@
 *   **⚙️ 服务管理**: 自动创建 Systemd 服务，支持开机自启、后台静默运行、异常自动重启。
 *   **⌨️ 快捷指令**: 自动注册 `ech` 全局命令，随时随地管理服务。
 
-## 🚀 快速开始
+---
+
+## 🌐 Worker 部署（服务端）
+
+> **请先完成服务端部署，再安装客户端脚本。**
+
+本项目提供了增强版的 `_worker.js`，包含 **PROXYIP 支持**，解决 CF-to-CF 连接限制问题。
+
+### 什么是 PROXYIP？
+
+由于 Cloudflare Workers 的技术限制，无法直接连接到 Cloudflare 自有的 IP 地址段。这意味着：
+
+- ✅ 可以正常访问非 Cloudflare CDN 的站点（如 Google、YouTube）
+- ❌ 无法直接访问由 Cloudflare CDN 托管的网站（如 Twitter、ChatGPT、Discord）
+
+**PROXYIP** 通过第三方服务器作为跳板，解决这个限制。
+
+### 部署步骤
+
+1. 登录 [Cloudflare Dashboard](https://dash.cloudflare.com/)
+2. 进入 `Workers & Pages` → 创建 Worker
+3. 将本项目的 `_worker.js` 内容复制到编辑器中
+4. 点击 `Save and Deploy`
+
+### PROXYIP 配置
+
+在 `_worker.js` 顶部可以配置 PROXYIP：
+
+```javascript
+// 方式一：使用默认公共 PROXYIP（推荐）
+const PROXYIP = '';  // 留空，自动使用内置的公共 PROXYIP 列表
+
+// 方式二：自定义 PROXYIP
+const PROXYIP = 'your-proxyip.com';  // 单个
+const PROXYIP = 'ip1.com,ip2.com';   // 多个，用逗号分隔
+```
+
+**内置公共 PROXYIP 列表：**
+- `proxyip.cmliussss.net` - cmliu 维护
+- `proxyip.fxxk.dedyn.io` - fxxk 维护
+
+### IP 归属地说明
+
+| 访问目标 | IP 归属地决定因素 |
+|---------|-----------------|
+| 非 CF 站点（Google、YouTube 等） | 由「优选 IP」决定 |
+| CF 站点（Twitter、ChatGPT 等） | 由「PROXYIP」决定 |
+
+---
+
+## 🚀 客户端安装
 
 在您的 Linux 终端中执行以下命令即可安装：
 
@@ -80,50 +130,6 @@ ECH_DOMAIN="cloudflare-ech.com"            # ECH 配置域名
 ROUTING="bypass_cn"                        # 分流模式: bypass_cn / global / none
 ```
 
-## 🌐 Worker 部署（服务端）
-
-本项目提供了增强版的 `_worker.js`，包含 **PROXYIP 支持**，解决 CF-to-CF 连接限制问题。
-
-### 什么是 PROXYIP？
-
-由于 Cloudflare Workers 的技术限制，无法直接连接到 Cloudflare 自有的 IP 地址段。这意味着：
-
-- ✅ 可以正常访问非 Cloudflare CDN 的站点（如 Google、YouTube）
-- ❌ 无法直接访问由 Cloudflare CDN 托管的网站（如 Twitter、ChatGPT、Discord）
-
-**PROXYIP** 通过第三方服务器作为跳板，解决这个限制。
-
-### 部署步骤
-
-1. 登录 [Cloudflare Dashboard](https://dash.cloudflare.com/)
-2. 进入 `Workers & Pages` → 创建 Worker
-3. 将本项目的 `_worker.js` 内容复制到编辑器中
-4. 点击 `Save and Deploy`
-
-### PROXYIP 配置
-
-在 `_worker.js` 顶部可以配置 PROXYIP：
-
-```javascript
-// 方式一：使用默认公共 PROXYIP（推荐）
-const PROXYIP = '';  // 留空，自动使用内置的公共 PROXYIP 列表
-
-// 方式二：自定义 PROXYIP
-const PROXYIP = 'your-proxyip.com';  // 单个
-const PROXYIP = 'ip1.com,ip2.com';   // 多个，用逗号分隔
-```
-
-**内置公共 PROXYIP 列表：**
-- `proxyip.cmliussss.net` - cmliu 维护
-- `proxyip.fxxk.dedyn.io` - fxxk 维护
-
-### IP 归属地说明
-
-| 访问目标 | IP 归属地决定因素 |
-|---------|-----------------|
-| 非 CF 站点（Google、YouTube 等） | 由「优选 IP」决定 |
-| CF 站点（Twitter、ChatGPT 等） | 由「PROXYIP」决定 |
-
 ## 🤝 贡献与致谢
 
 *   核心程序: [byJoey/ech-wk](https://github.com/byJoey/ech-wk)
@@ -132,4 +138,3 @@ const PROXYIP = 'ip1.com,ip2.com';   // 多个，用逗号分隔
 *   脚本维护: lzban8
 
 欢迎提交 Issue 或 Pull Request 来改进此脚本！
- 
