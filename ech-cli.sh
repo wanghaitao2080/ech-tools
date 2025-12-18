@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ECH Workers Client 一键管理脚本
-# 支持系统: Debian / Ubuntu / Armbian / CentOS 7+ (需支持 systemd)
+# 支持系统: Debian / Ubuntu / Armbian / CentOS 7+ / OpenWrt (iStoreOS)
 # 功能: 自动安装、配置、服务管理、日志查看
 
 # 颜色定义
@@ -17,11 +17,27 @@ PLAIN='\033[0m'
 REPO_OWNER="byJoey"
 REPO_NAME="ech-wk"
 BIN_PATH="/usr/local/bin/ech-workers"
-SERVICE_FILE="/etc/systemd/system/ech-workers.service"
+SERVICE_FILE_SYSTEMD="/etc/systemd/system/ech-workers.service"
+SERVICE_FILE_OPENWRT="/etc/init.d/ech-workers"
 CONF_FILE="/etc/ech-workers.conf"
+
+# 全局变量：是否为 OpenWrt
+IS_OPENWRT=0
 
 # 检查是否为 Root 用户
 [[ $EUID -ne 0 ]] && echo -e "${RED}错误: 必须使用 root 用户运行此脚本！${PLAIN}" && exit 1
+
+# 检查系统类型
+check_os() {
+    if [ -f /etc/openwrt_release ]; then
+        IS_OPENWRT=1
+    elif [ -f /etc/os-release ] && grep -q "OpenWrt" /etc/os-release;
+ then
+        IS_OPENWRT=1
+    else
+        IS_OPENWRT=0
+    fi
+}
 
 # 检查系统架构
 check_arch() {
@@ -44,7 +60,17 @@ check_arch() {
 # 安装依赖
 install_dependencies() {
     echo -e "${YELLOW}正在检查并安装依赖...${PLAIN}"
-    if [ -f /etc/debian_version ]; then
+    check_os
+    
+    if [ "$IS_OPENWRT" -eq 1 ]; then
+        echo -e "${GREEN}检测到 OpenWrt/iStoreOS 系统${PLAIN}"
+        echo -e "${YELLOW}正在更新 opkg 软件源...${PLAIN}"
+        opkg update
+        echo -e "${YELLOW}正在安装依赖 (curl, wget, jq, tar, ca-bundle)...${PLAIN}"
+        # 安装 wget-ssl 以支持 https，安装 ca-bundle / ca-certificates
+        opkg install curl wget-ssl tar jq ca-bundle ca-certificates
+        # 部分固件 wget 可能是 busybox 版本，确保有完整版或 curl 可用
+    elif [ -f /etc/debian_version ]; then
         apt-get update -y
         apt-get install -y curl wget tar jq
     elif [ -f /etc/redhat-release ]; then
@@ -52,6 +78,9 @@ install_dependencies() {
     else
         echo -e "${RED}无法识别的系统，请手动安装 curl, wget, tar, jq${PLAIN}"
     fi
+    
+    # 确保 /usr/local/bin 存在
+    mkdir -p /usr/local/bin
 }
 
 # 获取配置
@@ -83,9 +112,47 @@ ROUTING="$ROUTING"
 EOF
 }
 
+# 生成 OpenWrt Procd 服务文件
+create_service_openwrt() {
+    cat > "$SERVICE_FILE_OPENWRT" <<EOF
+#!/bin/sh /etc/rc.common
+
+START=99
+USE_PROCD=1
+
+CONF_FILE="/etc/ech-workers.conf"
+
+start_service() {
+    if [ -f "\$CONF_FILE" ]; then
+        . "\$CONF_FILE"
+    else
+        echo "Config file not found!"
+        return 1
+    fi
+
+    procd_open_instance
+    procd_set_param command $BIN_PATH
+    procd_append_param command -f "\$SERVER_ADDR"
+    procd_append_param command -l "\$LISTEN_ADDR"
+    procd_append_param command -token "\$TOKEN"
+    procd_append_param command -ip "\$BEST_IP"
+    procd_append_param command -dns "\$DNS"
+    procd_append_param command -ech "\$ECH_DOMAIN"
+    procd_append_param command -routing "\$ROUTING"
+    
+    procd_set_param respawn
+    procd_set_param stdout 1
+    procd_set_param stderr 1
+    procd_close_instance
+}
+EOF
+    chmod +x "$SERVICE_FILE_OPENWRT"
+    /etc/init.d/ech-workers enable >/dev/null 2>&1
+}
+
 # 生成 Systemd 服务文件
-create_service() {
-    cat > "$SERVICE_FILE" <<EOF
+create_service_systemd() {
+    cat > "$SERVICE_FILE_SYSTEMD" <<EOF
 [Unit]
 Description=ECH Workers Client Service
 After=network.target
@@ -103,6 +170,61 @@ WantedBy=multi-user.target
 EOF
     systemctl daemon-reload
     systemctl enable ech-workers >/dev/null 2>&1
+}
+
+# 统一创建服务入口
+create_service() {
+    if [ "$IS_OPENWRT" -eq 1 ]; then
+        create_service_openwrt
+    else
+        create_service_systemd
+    fi
+}
+
+# 服务操作封装
+svc_start() {
+    if [ "$IS_OPENWRT" -eq 1 ]; then
+        /etc/init.d/ech-workers start
+    else
+        systemctl start ech-workers
+    fi
+}
+
+svc_stop() {
+    if [ "$IS_OPENWRT" -eq 1 ]; then
+        /etc/init.d/ech-workers stop
+    else
+        systemctl stop ech-workers
+    fi
+}
+
+svc_restart() {
+    if [ "$IS_OPENWRT" -eq 1 ]; then
+        /etc/init.d/ech-workers restart
+    else
+        systemctl restart ech-workers
+    fi
+}
+
+svc_disable() {
+    if [ "$IS_OPENWRT" -eq 1 ]; then
+        /etc/init.d/ech-workers disable
+    else
+        systemctl disable ech-workers
+    fi
+}
+
+svc_is_active() {
+    if [ "$IS_OPENWRT" -eq 1 ]; then
+        # OpenWrt 检查进程是否存在
+        if pgrep -f "$BIN_PATH" >/dev/null; then
+            return 0
+        else
+            return 1
+        fi
+    else
+        systemctl is-active --quiet ech-workers
+    fi
 }
 
 # 安装/更新
@@ -168,7 +290,7 @@ install_ech() {
             load_config
             create_service
             echo -e "${GREEN}服务已更新，正在重启...${PLAIN}"
-            systemctl restart ech-workers
+            svc_restart
         fi
 
         # 创建快捷指令
@@ -219,15 +341,31 @@ configure_ech() {
     
     read -p "是否立即重启服务生效？[y/N]: " restart_now
     if [[ "$restart_now" == "y" || "$restart_now" == "Y" ]]; then
-        systemctl restart ech-workers
+        svc_restart
         check_status
     fi
 }
 
 # 检查系统信息
 get_sys_info() {
-    if [ -f /etc/os-release ]; then
-        OS=$(grep -oP 'PRETTY_NAME="\K[^"]+' /etc/os-release)
+    if [ -f /etc/openwrt_release ]; then
+        # 直接 source 文件读取变量，兼容性最好 (忽略错误输出)
+        # 使用子 shell 避免污染当前环境
+        OS=$(
+            . /etc/openwrt_release >/dev/null 2>&1
+            echo "$DISTRIB_DESCRIPTION" | awk '{print $1,$2}'
+        )
+        # 如果获取失败，回退到默认
+        [ -z "$OS" ] && OS="OpenWrt"
+    elif [ -f /etc/os-release ]; then
+        OS=$(grep -oP 'PRETTY_NAME="\K[^"]+' /etc/os-release 2>/dev/null)
+        # 如果 grep -P 不支持，尝试 source 方式
+        if [ -z "$OS" ]; then
+            OS=$(
+                . /etc/os-release >/dev/null 2>&1
+                echo "$PRETTY_NAME"
+            )
+        fi
     else
         OS=$(uname -s)
     fi
@@ -238,10 +376,31 @@ get_sys_info() {
 # 检查状态
 check_status() {
     get_sys_info
-    if systemctl is-active --quiet ech-workers; then
+    if svc_is_active; then
         STATUS="${GREEN}运行中${PLAIN}"
-        PID=$(pgrep -f $BIN_PATH)
-        RUN_TIME=$(ps -o etime= -p $PID | tr -d ' ')
+        PID=$(pgrep -f $BIN_PATH | head -n 1)
+        
+        # 尝试获取格式化运行时长
+        RUN_TIME=$(ps -o etime= -p $PID 2>/dev/null | tr -d ' ')
+        
+        # 如果 ps 不支持 etime (常见于 OpenWrt/Busybox)
+        if [ -z "$RUN_TIME" ] && [ -f "/proc/$PID/stat" ]; then
+            UPTIME_SEC=$(cat /proc/uptime | awk '{print int($1)}')
+            # 第22位是启动时的 jiffies
+            START_TICKS=$(cat /proc/$PID/stat | awk '{print $22}')
+            # 获取系统每秒 ticks (通常为 100)
+            CLK_TCK=$(getconf CLK_TCK 2>/dev/null || echo 100)
+            START_SEC=$((START_TICKS / CLK_TCK))
+            DIFF_SEC=$((UPTIME_SEC - START_SEC))
+            
+            if [ $DIFF_SEC -lt 0 ]; then DIFF_SEC=0; fi
+            H=$((DIFF_SEC / 3600))
+            M=$(( (DIFF_SEC % 3600) / 60 ))
+            S=$((DIFF_SEC % 60))
+            RUN_TIME=$(printf "%02d:%02d:%02d" $H $M $S)
+        fi
+        
+        [ -z "$RUN_TIME" ] && RUN_TIME="Running"
     else
         STATUS="${RED}未运行${PLAIN}"
         PID="N/A"
@@ -259,10 +418,9 @@ view_logs() {
     
     CLIENTS=""
     if command -v ss >/dev/null 2>&1; then
-        # 修复 IPv6 显示不全问题 (移除最后冒号后的端口号，并清理中括号)
-        CLIENTS=$(ss -an state established | grep ":$CONF_PORT" | awk '{print $5}' | sed 's/\[//g; s/\]//g' | rev | cut -d: -f2- | rev | sort | uniq | grep -v "127.0.0.1")
+        CLIENTS=$(ss -an state established | grep ":$CONF_PORT" | awk '{print $5}' | sed 's/\\[//g; s/\\]//g' | rev | cut -d: -f2- | rev | sort | uniq | grep -v "127.0.0.1")
     elif command -v netstat >/dev/null 2>&1; then
-        CLIENTS=$(netstat -an | grep ":$CONF_PORT" | grep ESTABLISHED | awk '{print $5}' | sed 's/\[//g; s/\]//g' | rev | cut -d: -f2- | rev | sort | uniq | grep -v "127.0.0.1")
+        CLIENTS=$(netstat -an | grep ":$CONF_PORT" | grep ESTABLISHED | awk '{print $5}' | sed 's/\\[//g; s/\\]//g' | rev | cut -d: -f2- | rev | sort | uniq | grep -v "127.0.0.1")
     fi
     
     # 统计数量
@@ -277,17 +435,13 @@ view_logs() {
          # 循环查询 IP 归属地
          while read -r ip; do
              if [ ! -z "$ip" ]; then
-                 # 移除可能的端口号（兼容 ipv4:port 格式）
                  clean_ip=$(echo "$ip" | sed 's/:[0-9]*$//')
-                 
-                 # 使用 ip-api.com (HTTP) 查询，纯文本格式，增加超时
                  LOCATION=$(curl -s -m 2 "http://ip-api.com/line/${clean_ip}?fields=country,regionName,city,isp&lang=zh-CN")
-                 
                  if [ ! -z "$LOCATION" ]; then
                      LOC_STR=$(echo "$LOCATION" | tr '\n' ' ' | sed 's/ $//')
-                     echo -e " ${CYAN}$ip${PLAIN} \t-> ${YELLOW}[$LOC_STR]${PLAIN}"
+                     echo -e " ${CYAN}$ip${PLAIN} 	-> ${YELLOW}[$LOC_STR]${PLAIN}"
                  else
-                     echo -e " ${CYAN}$ip${PLAIN} \t-> ${RED}[位置查询超时]${PLAIN}"
+                     echo -e " ${CYAN}$ip${PLAIN} 	-> ${RED}[位置查询超时]${PLAIN}"
                  fi
              fi
          done <<< "$CLIENTS"
@@ -295,26 +449,26 @@ view_logs() {
     echo -e "------------------------------------------------------"
 
     echo -e "${YELLOW}正在获取最后 50 行日志 (按 Ctrl+C 退出)...${PLAIN}"
-    journalctl -u ech-workers -n 50 -f
+    if [ "$IS_OPENWRT" -eq 1 ]; then
+        logread -e "ech-workers" | tail -n 50
+        echo -e "${YELLOW}(OpenWrt 请使用 'logread -f -e ech-workers' 查看实时日志)${PLAIN}"
+    else
+        journalctl -u ech-workers -n 50 -f
+    fi
 }
 
 # 脚本版本
-SCRIPT_VER="v1.1.1"
+SCRIPT_VER="v1.1.2"
 
 # 检查脚本更新
 check_script_update() {
-    # 避免重复检查
     if [ ! -z "$UPDATE_TIP" ]; then return; fi
     
-    # 后台异步检查 (通过临时文件通讯)
     UPDATE_TMP="/tmp/ech_update_check"
     
     if [ ! -f "$UPDATE_TMP" ]; then
-        # 如果没有临时文件，启动后台进程去查
-        # 智能选择源：如果之前检测到在国内，就用加速镜像
         (
             CHECK_URL="https://raw.githubusercontent.com/lzban8/ech-cli-tool/main/ech-cli.sh"
-            # 简单检测一下 connectivity
             if ! curl -s -m 2 --head https://raw.githubusercontent.com >/dev/null; then
                  CHECK_URL="https://gh-proxy.org/https://raw.githubusercontent.com/lzban8/ech-cli-tool/main/ech-cli.sh"
             fi
@@ -324,10 +478,8 @@ check_script_update() {
         ) &
         UPDATE_TIP="${YELLOW}检查中...${PLAIN}"
     else
-        # 读取后台结果
         REMOTE_VERSION=$(cat "$UPDATE_TMP")
         if [[ -z "$REMOTE_VERSION" ]]; then
-            # 可能是上次失败了，清理重试
              rm -f "$UPDATE_TMP"
              UPDATE_TIP="${YELLOW}检查中...${PLAIN}"
         elif [[ "$REMOTE_VERSION" != "$SCRIPT_VER" ]]; then
@@ -347,9 +499,45 @@ update_script() {
     exit 0
 }
 
+# 卸载脚本和客户端
+uninstall_all() {
+    echo -e "${YELLOW}警告：此操作将彻底卸载 ECH 客户端服务，并删除脚本文件及所有配置！${PLAIN}"
+    echo -e "${RED}所有数据将被清除且不可恢复。${PLAIN}"
+    read -p "确定要继续吗？[y/N]: " confirm
+    if [[ "$confirm" == "y" || "$confirm" == "Y" ]]; then
+        # 1. 停止并禁用服务
+        echo -e "${YELLOW}正在停止服务...${PLAIN}"
+        svc_stop >/dev/null 2>&1
+        svc_disable >/dev/null 2>&1
+        
+        # 2. 删除服务文件
+        echo -e "${YELLOW}正在清理文件...${PLAIN}"
+        rm -f "$SERVICE_FILE_SYSTEMD" "$SERVICE_FILE_OPENWRT"
+        if [ "$IS_OPENWRT" -eq 0 ]; then
+            systemctl daemon-reload >/dev/null 2>&1
+        fi
+        
+        # 3. 删除二进制和配置
+        rm -f "$BIN_PATH" "$CONF_FILE"
+        
+        # 4. 删除快捷指令
+        rm -f /usr/bin/ech
+        
+        # 5. 删除脚本自身
+        SCRIPT_PATH=$(readlink -f "$0")
+        rm -f "$SCRIPT_PATH"
+        
+        echo -e "${GREEN}卸载完成！所有相关文件已清除。${PLAIN}"
+        exit 0
+    else
+        echo -e "${GREEN}已取消${PLAIN}"
+    fi
+}
+
 # 主菜单
 show_menu() {
     clear
+    check_os # 重新检测
     check_status
     load_config
     check_script_update
@@ -385,28 +573,32 @@ show_menu() {
     echo -e " ${GREEN}5.${PLAIN} 停止服务"
     echo -e " ${GREEN}6.${PLAIN} 重启服务"
     echo -e " ${GREEN}7.${PLAIN} 查看日志"
-    echo -e " ${GREEN}8.${PLAIN} 卸载客户端"
+    echo -e " ${GREEN}8.${PLAIN} 卸载客户端 (保留脚本)"
     echo -e " ${GREEN}9.${PLAIN} 创建快捷指令 (修复)"
+    echo -e " ${GREEN}10.${PLAIN} 彻底卸载 (移除所有)"
     echo -e " ${GREEN}0.${PLAIN} 退出脚本"
     echo -e "------------------------------------------------------"
-    read -p "请输入选择 [0-9]: " choice
+    read -p "请输入选择 [0-10]: " choice
     
     case $choice in
         1) install_ech ;;
         2) update_script ;;
         3) configure_ech ;;
-        4) systemctl start ech-workers && echo -e "${GREEN}已启动${PLAIN}" ;;
-        5) systemctl stop ech-workers && echo -e "${RED}已停止${PLAIN}" ;;
-        6) systemctl restart ech-workers && echo -e "${GREEN}已重启${PLAIN}" ;;
+        4) svc_start && echo -e "${GREEN}已启动${PLAIN}" ;;
+        5) svc_stop && echo -e "${RED}已停止${PLAIN}" ;;
+        6) svc_restart && echo -e "${GREEN}已重启${PLAIN}" ;;
         7) view_logs ;;
         8) 
-            systemctl stop ech-workers
-            systemctl disable ech-workers
-            rm -f $SERVICE_FILE $BIN_PATH /usr/bin/ech
-            systemctl daemon-reload
+            svc_stop
+            svc_disable
+            rm -f $SERVICE_FILE_SYSTEMD $SERVICE_FILE_OPENWRT $BIN_PATH /usr/bin/ech
+            if [ "$IS_OPENWRT" -eq 0 ]; then
+                systemctl daemon-reload
+            fi
             echo -e "${GREEN}已卸载${PLAIN}"
             ;;
         9) create_shortcut ;;
+        10) uninstall_all ;;
         0) exit 0 ;;
         *) echo -e "${RED}无效选择${PLAIN}" ;;
     esac
@@ -414,7 +606,7 @@ show_menu() {
     read -p "按回车键继续..."
 }
 
-# 支持非交互安装
+# 命令行参数处理
 if [ "$1" == "install" ]; then
     install_ech
     exit 0
