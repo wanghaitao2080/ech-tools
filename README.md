@@ -92,7 +92,7 @@
 
 ```bash
 # 方法一：直接下载（海外或网络通畅）
-wget -O ech-cli.sh https://raw.githubusercontent.com/lzban8/ech-cli-tool/main/ech-cli.sh
+wget --no-check-certificate -O ech-cli.sh https://raw.githubusercontent.com/lzban8/ech-cli-tool/main/ech-cli.sh
 
 # 方法二：使用 gh-proxy 镜像下载（国内推荐）
 wget --no-check-certificate -O ech-cli.sh https://gh-proxy.org/https://raw.githubusercontent.com/lzban8/ech-cli-tool/main/ech-cli.sh
