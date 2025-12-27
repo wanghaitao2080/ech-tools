@@ -601,7 +601,7 @@ view_logs() {
 }
 
 # 脚本版本
-SCRIPT_VER="v1.1.2"
+SCRIPT_VER="v1.1.3"
 
 # 版本号比较函数：判断 $1 是否大于 $2
 # 返回 0 表示 $1 > $2，返回 1 表示 $1 <= $2
@@ -610,56 +610,67 @@ version_gt() {
     local v1="${1#v}"
     local v2="${2#v}"
     
-    # 使用 sort -V 进行版本排序比较
-    if command -v sort >/dev/null 2>&1; then
-        local highest=$(printf '%s\n%s' "$v1" "$v2" | sort -V | tail -n 1)
-        if [[ "$highest" == "$v1" && "$v1" != "$v2" ]]; then
-            return 0
-        fi
-    else
-        # 简单的数字比较 fallback
-        IFS='.' read -r -a arr1 <<< "$v1"
-        IFS='.' read -r -a arr2 <<< "$v2"
-        for i in 0 1 2; do
-            local n1=${arr1[$i]:-0}
-            local n2=${arr2[$i]:-0}
-            if (( n1 > n2 )); then return 0; fi
-            if (( n1 < n2 )); then return 1; fi
-        done
-    fi
+    # 纯 Shell 实现版本比较，兼容 BusyBox
+    local IFS='.'
+    set -- $v1
+    local v1_major=${1:-0} v1_minor=${2:-0} v1_patch=${3:-0}
+    set -- $v2
+    local v2_major=${1:-0} v2_minor=${2:-0} v2_patch=${3:-0}
+    
+    # 逐位比较
+    if [ "$v1_major" -gt "$v2_major" ] 2>/dev/null; then return 0; fi
+    if [ "$v1_major" -lt "$v2_major" ] 2>/dev/null; then return 1; fi
+    if [ "$v1_minor" -gt "$v2_minor" ] 2>/dev/null; then return 0; fi
+    if [ "$v1_minor" -lt "$v2_minor" ] 2>/dev/null; then return 1; fi
+    if [ "$v1_patch" -gt "$v2_patch" ] 2>/dev/null; then return 0; fi
+    
     return 1
 }
 
-# 检查脚本更新
 check_script_update() {
+    # 如果已有缓存结果，直接使用
     if [ ! -z "$UPDATE_TIP" ]; then return; fi
     
     UPDATE_TMP="/tmp/ech_update_check"
+    UPDATE_TMP_TIME="/tmp/ech_update_time"
     
-    if [ ! -f "$UPDATE_TMP" ]; then
-        (
-            CHECK_URL="https://raw.githubusercontent.com/lzban8/ech-cli-tool/main/ech-cli.sh"
-            if ! curl -s -m 2 --head https://raw.githubusercontent.com >/dev/null; then
-                 CHECK_URL="https://gh-proxy.org/https://raw.githubusercontent.com/lzban8/ech-cli-tool/main/ech-cli.sh"
-            fi
-            
-            REMOTE_VERSION=$(curl -s -m 5 "$CHECK_URL" | grep 'SCRIPT_VER="' | head -n 1 | cut -d '"' -f 2)
-            echo "$REMOTE_VERSION" > "$UPDATE_TMP"
-        ) &
-        UPDATE_TIP="${YELLOW}检查中...${PLAIN}"
-    else
-        REMOTE_VERSION=$(cat "$UPDATE_TMP")
-        if [[ -z "$REMOTE_VERSION" ]]; then
-             rm -f "$UPDATE_TMP"
-             UPDATE_TIP="${YELLOW}检查中...${PLAIN}"
-        elif version_gt "$REMOTE_VERSION" "$SCRIPT_VER"; then
-            # 只有远程版本大于本地版本时才提示更新
-            UPDATE_TIP="${GREEN}新版本: ${REMOTE_VERSION}${PLAIN}"
-            CAN_UPDATE=1
-        else
-            UPDATE_TIP="${GREEN}最新${PLAIN}"
-            CAN_UPDATE=0
+    # 检查缓存是否过期（1小时 = 3600秒）
+    CACHE_EXPIRED=1
+    if [ -f "$UPDATE_TMP" ] && [ -f "$UPDATE_TMP_TIME" ]; then
+        CACHE_TIME=$(cat "$UPDATE_TMP_TIME" 2>/dev/null || echo 0)
+        NOW_TIME=$(date +%s)
+        DIFF=$((NOW_TIME - CACHE_TIME))
+        if [ "$DIFF" -lt 3600 ] 2>/dev/null; then
+            CACHE_EXPIRED=0
         fi
+    fi
+    
+    if [ "$CACHE_EXPIRED" -eq 1 ]; then
+        # 同步获取版本（最多等待 3 秒）
+        CHECK_URL="https://raw.githubusercontent.com/lzban8/ech-cli-tool/main/ech-cli.sh"
+        if ! curl -s -m 2 --head https://raw.githubusercontent.com >/dev/null 2>&1; then
+            CHECK_URL="https://gh-proxy.org/https://raw.githubusercontent.com/lzban8/ech-cli-tool/main/ech-cli.sh"
+        fi
+        
+        REMOTE_VERSION=$(curl -s -m 3 "$CHECK_URL" 2>/dev/null | grep 'SCRIPT_VER="' | head -n 1 | cut -d '"' -f 2)
+        if [ ! -z "$REMOTE_VERSION" ]; then
+            echo "$REMOTE_VERSION" > "$UPDATE_TMP"
+            date +%s > "$UPDATE_TMP_TIME"
+        fi
+    else
+        REMOTE_VERSION=$(cat "$UPDATE_TMP" 2>/dev/null)
+    fi
+    
+    # 判断版本
+    if [ -z "$REMOTE_VERSION" ]; then
+        UPDATE_TIP="${YELLOW}检查失败${PLAIN}"
+        CAN_UPDATE=0
+    elif version_gt "$REMOTE_VERSION" "$SCRIPT_VER"; then
+        UPDATE_TIP="${GREEN}新版本: ${REMOTE_VERSION}${PLAIN}"
+        CAN_UPDATE=1
+    else
+        UPDATE_TIP="${GREEN}最新${PLAIN}"
+        CAN_UPDATE=0
     fi
 }
 
