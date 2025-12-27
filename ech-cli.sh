@@ -101,46 +101,75 @@ load_config() {
 
 # 备份配置
 
-# 多优选IP测速
+# 优选域名测速
 test_best_ip() {
-    echo -e "${YELLOW}正在测速优选IP...${PLAIN}"
+    echo -e "${YELLOW}正在测速优选域名...${PLAIN}"
     
     # 优选域名测试列表
-    TEST_IPS=("ip.164746.xyz" "cdn.2020111.xyz" "bestcf.top" "cfip.cfcdn.vip" "speed.marisalnc.com" "freeyx.cloudflare88.eu.org" "cfip.xxxxxxxx.tk" "saas.sin.fan" "cf.090227.xyz" "cloudflare.182682.xyz" "bestcf.030101.xyz")
+    TEST_IPS=("ip.164746.xyz" "cdn.2020111.xyz" "bestcf.top" "cfip.cfcdn.vip" "freeyx.cloudflare88.eu.org" "cfip.xxxxxxxx.tk" "saas.sin.fan" "cf.090227.xyz" "cloudflare.182682.xyz" "bestcf.030101.xyz")
     
-    BEST_TIME=9999000  # 使用毫秒整数，避免浮点运算
-    BEST_IP_RESULT=""
+    # 存储测速结果
+    declare -a RESULT_IPS
+    declare -a RESULT_TIMES
+    BEST_TIME=9999000
+    BEST_INDEX=-1
+    INDEX=0
     
     for ip in "${TEST_IPS[@]}"; do
+        INDEX=$((INDEX + 1))
         # 使用 curl 测量连接时间（毫秒）
         TIME_MS=$(curl -o /dev/null -s -w '%{time_total}' --connect-timeout 3 -m 5 "https://${ip}" 2>/dev/null | awk '{printf "%.0f", $1 * 1000}')
         if [ $? -eq 0 ] && [ ! -z "$TIME_MS" ] && [ "$TIME_MS" != "0" ]; then
-            echo -e "  ${ip}: ${GREEN}${TIME_MS}ms${PLAIN}"
-            # 纯整数比较，无需 bc
+            echo -e "  [${INDEX}] ${ip}: ${GREEN}${TIME_MS}ms${PLAIN}"
+            RESULT_IPS+=("$ip")
+            RESULT_TIMES+=("$TIME_MS")
+            # 纯整数比较
             if [ "$TIME_MS" -lt "$BEST_TIME" ] 2>/dev/null; then
                 BEST_TIME=$TIME_MS
-                BEST_IP_RESULT=$ip
+                BEST_INDEX=${#RESULT_IPS[@]}
             fi
         else
-            echo -e "  ${ip}: ${RED}超时${PLAIN}"
+            echo -e "  [${INDEX}] ${ip}: ${RED}超时${PLAIN}"
         fi
     done
     
-    if [ ! -z "$BEST_IP_RESULT" ]; then
-        echo -e "${GREEN}最优IP: $BEST_IP_RESULT (${BEST_TIME}ms)${PLAIN}"
-        read -p "是否使用此IP？[y/N]: " confirm
-        if [[ "$confirm" == "y" || "$confirm" == "Y" ]]; then
-            BEST_IP="$BEST_IP_RESULT"
-            save_config
-            create_service
-            read -p "是否立即重启服务生效？[y/N]: " restart_now
-            if [[ "$restart_now" == "y" || "$restart_now" == "Y" ]]; then
-                svc_restart
-                echo -e "${GREEN}服务已重启！${PLAIN}"
-            fi
+    if [ ${#RESULT_IPS[@]} -eq 0 ]; then
+        echo -e "${RED}所有域名测速失败，请检查网络${PLAIN}"
+        return
+    fi
+    
+    # 显示最优结果
+    BEST_IP_RESULT="${RESULT_IPS[$((BEST_INDEX - 1))]}"
+    echo -e ""
+    echo -e "${GREEN}推荐最优: $BEST_IP_RESULT (${BEST_TIME}ms)${PLAIN}"
+    echo -e ""
+    read -p "是否使用推荐的最优域名？[y/N/编号]: " confirm
+    
+    # 处理用户输入
+    if [[ "$confirm" == "y" || "$confirm" == "Y" ]]; then
+        SELECTED_IP="$BEST_IP_RESULT"
+    elif [[ "$confirm" =~ ^[0-9]+$ ]]; then
+        # 用户输入了编号
+        if [ "$confirm" -ge 1 ] && [ "$confirm" -le ${#RESULT_IPS[@]} ]; then
+            SELECTED_IP="${RESULT_IPS[$((confirm - 1))]}"
+            echo -e "${GREEN}已选择: $SELECTED_IP${PLAIN}"
+        else
+            echo -e "${RED}无效编号${PLAIN}"
+            return
         fi
     else
-        echo -e "${RED}所有域名测速失败，请检查网络${PLAIN}"
+        echo -e "${YELLOW}已取消，可在「修改配置」中自定义优选域名${PLAIN}"
+        return
+    fi
+    
+    # 应用选择
+    BEST_IP="$SELECTED_IP"
+    save_config
+    create_service
+    read -p "是否立即重启服务生效？[y/N]: " restart_now
+    if [[ "$restart_now" == "y" || "$restart_now" == "Y" ]]; then
+        svc_restart
+        echo -e "${GREEN}服务已重启！${PLAIN}"
     fi
 }
 
@@ -810,7 +839,7 @@ show_menu() {
     echo -e " ${GREEN}6.${PLAIN} 重启服务"
     echo -e " ${GREEN}7.${PLAIN} 查看日志"
     echo -e " ${GREEN}8.${PLAIN} 状态检查"
-    echo -e " ${GREEN}9.${PLAIN} 优选IP测速"
+    echo -e " ${GREEN}9.${PLAIN} 优选域名测速"
     echo -e " ${GREEN}10.${PLAIN} 卸载客户端"
     echo -e " ${GREEN}11.${PLAIN} 创建快捷指令"
     echo -e " ${GREEN}12.${PLAIN} 彻底卸载"
