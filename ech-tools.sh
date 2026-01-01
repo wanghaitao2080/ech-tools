@@ -813,9 +813,40 @@ uninstall_all() {
 show_menu() {
     clear
     check_os # 重新检测
-    check_status
     load_config
     check_script_update
+    
+    # 检查客户端是否已安装
+    if [ ! -f "$BIN_PATH" ]; then
+        # 未安装客户端，显示精简菜单
+        echo -e "${BLUE}
+    ███████╗ ██████╗██╗  ██╗
+    ██╔════╝██╔════╝██║  ██║
+    █████╗  ██║     ███████║
+    ██╔══╝  ██║     ██╔══██║
+    ███████╗╚██████╗██║  ██║
+    ╚══════╝ ╚═════╝╚═╝  ╚═╝
+    ${PLAIN}"
+        echo -e "${YELLOW}检测到客户端未安装，请先安装客户端！${PLAIN}"
+        echo -e "当前版本: ${GREEN}${SCRIPT_VER}${PLAIN}  状态: ${UPDATE_TIP}"
+        echo -e "------------------------------------------------------"
+        echo -e " ${GREEN}1.${PLAIN} 安装/更新客户端"
+        echo -e " ${GREEN}0.${PLAIN} 退出脚本"
+        echo -e "------------------------------------------------------"
+        read -p "请输入选择 [0-1]: " choice
+        
+        case $choice in
+            1) install_ech ;;
+            0) exit 0 ;;
+            *) echo -e "${RED}无效选择${PLAIN}" ;;
+        esac
+        
+        read -p "按回车键继续..."
+        return
+    fi
+    
+    # 客户端已安装，显示完整菜单
+    check_status
 
     echo -e "${BLUE}
     ███████╗ ██████╗██╗  ██╗
